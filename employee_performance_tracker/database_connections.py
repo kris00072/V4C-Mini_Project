@@ -17,31 +17,16 @@ from sqlite3 import Error as SQLiteError
 from pymongo import MongoClient, errors as MongoErrors
 from dotenv import load_dotenv
 
+# Load .env file
+load_dotenv()
 
-# Load environment variables from .env in the same directory
+# Read environment variables
+SQLITE_FILE = os.getenv("SQLITE_FILE", "company.db")
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "performance_reviews_db")
+MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "reviews")
 
-env_path = os.path.join(os.path.dirname(__file__), '.env')
-load_dotenv(dotenv_path=env_path)
-
-SQLITE_FILE = os.getenv('SQLITE_FILE')
-MONGO_URI = os.getenv('MONGO_URI')
-MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
-MONGO_COLLECTION_NAME = os.getenv('MONGO_COLLECTION_NAME')
-
-# Strict validation: all required envs must exist
-missing_envs = [var for var in ['SQLITE_FILE', 'MONGO_URI', 'MONGO_DB_NAME', 'MONGO_COLLECTION_NAME']
-                if not os.getenv(var)]
-if missing_envs:
-    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_envs)}")
-
-
-
-# SQLite Connection Helpers
-def get_sqlite_connection(db_file=SQLITE_FILE):
-    """
-    Returns a SQLite connection object.
-    Sets row_factory to sqlite3.Row so we can access columns by name.
-    """
+def test_sqlite():
     try:
         conn = sqlite3.connect(db_file, detect_types=sqlite3.PARSE_DECLTYPES)
         conn.row_factory = sqlite3.Row
@@ -166,4 +151,11 @@ if __name__ == "__main__":
         reviews_col = get_mongo_collection()
         print("[INFO] MongoDB collection ready:", reviews_col.name)
     except Exception as e:
-        print("[ERROR] MongoDB connection test failed:", e)
+        print("❌ MongoDB connection failed:", e)
+    finally:
+        client.close()
+
+if __name__ == "__main__":
+    print("🔍 Testing database connections...\n")
+    test_sqlite()
+    test_mongo()
