@@ -166,4 +166,4 @@ if __name__ == "__main__":
         reviews_col = get_mongo_collection()
         print("[INFO] MongoDB collection ready:", reviews_col.name)
     except Exception as e:
-        print("[ERROR] MongoDB connection test failed:", e)
+        print("[ERROR] MongoDB connection test failed:", e) 
