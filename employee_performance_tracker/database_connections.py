@@ -1,55 +1,169 @@
+# db_connections.py
+"""
+Database Connections Module
+---------------------------
+Provides connectivity for both SQLite (structured data) and MongoDB (performance reviews)
+for the Employee Performance Tracking System.
+
+Responsibilities:
+- Connect to SQLite and initialize tables and indexes
+- Connect to MongoDB Atlas using environment variables from a local .env file
+- Provide helper functions for safe database access
+"""
+
 import os
 import sqlite3
-from pymongo import MongoClient
+from sqlite3 import Error as SQLiteError
+from pymongo import MongoClient, errors as MongoErrors
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
 
-# Read environment variables
-SQLITE_FILE = os.getenv("SQLITE_FILE", "company.db")
-MONGO_URI = os.getenv("MONGO_URI")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "performance_reviews_db")
-MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "reviews")
+# Load environment variables from .env in the same directory
 
-def test_sqlite():
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path=env_path)
+
+SQLITE_FILE = os.getenv('SQLITE_FILE')
+MONGO_URI = os.getenv('MONGO_URI')
+MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
+MONGO_COLLECTION_NAME = os.getenv('MONGO_COLLECTION_NAME')
+
+# Strict validation: all required envs must exist
+missing_envs = [var for var in ['SQLITE_FILE', 'MONGO_URI', 'MONGO_DB_NAME', 'MONGO_COLLECTION_NAME']
+                if not os.getenv(var)]
+if missing_envs:
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_envs)}")
+
+
+
+# SQLite Connection Helpers
+def get_sqlite_connection(db_file=SQLITE_FILE):
+    """
+    Returns a SQLite connection object.
+    Sets row_factory to sqlite3.Row so we can access columns by name.
+    """
     try:
-        conn = sqlite3.connect(SQLITE_FILE)
+        conn = sqlite3.connect(db_file, detect_types=sqlite3.PARSE_DECLTYPES)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except SQLiteError as e:
+        print(f"[ERROR] Could not connect to SQLite DB at {db_file}: {e}")
+        raise
+
+
+def init_sqlite_db(conn):
+    """
+    Initializes SQLite database with required tables and indexes if they do not exist.
+    This is safe to call multiple times.
+    """
+    try:
         cur = conn.cursor()
-        # Create a simple table to test
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS test_table (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT
-            )
+        cur.executescript("""
+        -- Employees table
+        CREATE TABLE IF NOT EXISTS employees (
+            employee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            hire_date TEXT NOT NULL,
+            department TEXT
+        );
+
+        -- Projects table
+        CREATE TABLE IF NOT EXISTS projects (
+            project_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL UNIQUE,
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            status TEXT NOT NULL DEFAULT 'Planning'
+        );
+
+        -- EmployeeProjects junction table
+        CREATE TABLE IF NOT EXISTS employee_projects (
+            assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            assigned_date TEXT NOT NULL DEFAULT (date('now')),
+            FOREIGN KEY(employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+            UNIQUE(employee_id, project_id)
+        );
+
+        -- Indexes for faster lookups
+        CREATE INDEX IF NOT EXISTS idx_employee_projects_emp ON employee_projects(employee_id);
+        CREATE INDEX IF NOT EXISTS idx_employee_projects_proj ON employee_projects(project_id);
         """)
         conn.commit()
-        print("✅ SQLite connection successful and table created.")
-    except Exception as e:
-        print("❌ SQLite connection failed:", e)
+        
+    except SQLiteError as e:
+        print(f"[ERROR] Failed to initialize SQLite DB: {e}")
+        raise
+
+
+
+# MongoDB Connection Helper
+
+def get_mongo_collection(uri=None, db_name=None, collection_name=None):
+    """
+    Connects to MongoDB and returns the specified collection.
+    All parameters fallback to environment variables from the .env file.
+    Raises exception if connection fails.
+    """
+    uri = uri or MONGO_URI
+    db_name = db_name or MONGO_DB_NAME
+    collection_name = collection_name or MONGO_COLLECTION_NAME
+
+    try:
+        client = MongoClient(uri, serverSelectionTimeoutMS=5000)  # 5s timeout
+        client.server_info()  # trigger exception if cannot connect
+        db = client[db_name]
+        collection = db[collection_name]
+        return collection
+    except MongoErrors.ServerSelectionTimeoutError as e:
+        print(f"[ERROR] Could not connect to MongoDB: {e}")
+        raise
+    except MongoErrors.PyMongoError as e:
+        print(f"[ERROR] MongoDB error: {e}")
+        raise
+
+
+
+# Optional Context Manager
+
+from contextlib import contextmanager
+
+@contextmanager
+def sqlite_cursor(db_file=SQLITE_FILE):
+    """
+    Context manager for SQLite cursor.
+    Automatically commits and closes connection.
+    """
+    conn = get_sqlite_connection(db_file)
+    try:
+        cur = conn.cursor()
+        yield cur
+        conn.commit()
+    except SQLiteError as e:
+        conn.rollback()
+        print(f"[ERROR] SQLite operation failed: {e}")
+        raise
     finally:
         conn.close()
 
-def test_mongo():
-    try:
-        client = MongoClient(MONGO_URI)
-        db = client[MONGO_DB_NAME]
-        collection = db[MONGO_COLLECTION_NAME]
-        # Test insert
-        test_doc = {"test": "connection"}
-        result = collection.insert_one(test_doc)
-        # Test find
-        found = collection.find_one({"_id": result.inserted_id})
-        print("✅ MongoDB connection successful!")
-        print("   Database:", db.name)
-        print("   Collection:", collection.name)
-        print("   Test document inserted:", found)
-    except Exception as e:
-        print("❌ MongoDB connection failed:", e)
-    finally:
-        client.close()
+
+
+##for testing, willremove in production
 
 if __name__ == "__main__":
-    print("🔍 Testing database connections...\n")
-    test_sqlite()
-    test_mongo()
+    # SQLite test
+    conn = get_sqlite_connection()
+    init_sqlite_db(conn)
+    print("[INFO] SQLite tables ready.")
+
+    # MongoDB test
+    try:
+        reviews_col = get_mongo_collection()
+        print("[INFO] MongoDB collection ready:", reviews_col.name)
+    except Exception as e:
+        print("[ERROR] MongoDB connection test failed:", e)
