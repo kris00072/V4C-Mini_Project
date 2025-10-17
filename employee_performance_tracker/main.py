@@ -1,123 +1,192 @@
-from employee_manager import add_employee, get_employee_by_id, list_all_employees, update_employee, delete_employee
-import re
-from datetime import datetime
+"""
+Main file to interact with Employee, Project, and Performance Reviewer Modules
+"""
 
-def print_menu():
-    print("\n=== Employee Management System ===")
-    print("1. Add Employee")
-    print("2. List All Employees")
-    print("3. Get Employee by ID")
-    print("4. Update Employee Details")
-    print("5. Delete Employee")
-    print("6. Exit")
+from tabulate import tabulate
+from database_connections import get_sqlite_connection, get_mongo_collection
+from employee_manager import *
+from project_manager import *
+from performance_reviewer import *
 
-# Validation helpers
-def input_non_empty(prompt):
-    while True:
-        value = input(prompt).strip()
-        if value:
-            return value
-        print("⚠️ This field cannot be empty. Please enter a value.")
 
-def input_email(prompt):
-    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-    while True:
-        email = input(prompt).strip()
-        if not email:
-            print("⚠️ Email cannot be empty. Please enter a value.")
-            continue
-        if not re.match(pattern, email):
-            print("⚠️ Invalid email format. Please enter again.")
-        else:
-            return email
+# -------------------------
+# Display Helpers
+# -------------------------
+def display_table(records, title="Records"):
+    """Pretty-print records as a table."""
+    if not records:
+        print(f"\n⚠️ No {title.lower()} found.\n")
+        return
+    headers = records[0].keys()
+    rows = [r.values() for r in records]
+    print(f"\n--- {title} ---")
+    print(tabulate(rows, headers=headers, tablefmt="grid"))
 
-def input_date(prompt):
-    while True:
-        date_str = input(prompt).strip()
-        if not date_str:
-            print("⚠️ Date cannot be empty. Please enter a value.")
-            continue
-        try:
-            datetime.strptime(date_str, "%Y-%m-%d")
-            return date_str
-        except ValueError:
-            print("⚠️ Invalid date format. Use YYYY-MM-DD. Please enter again.")
 
+# -------------------------
+# Main Menu
+# -------------------------
 def main():
+    conn = get_sqlite_connection()
+    mongo_db = get_mongo_collection()
+    collection = mongo_db["performance_reviews"]
+
     while True:
-        print_menu()
-        choice = input("Enter your choice (1-6): ").strip()
+        print("\n=== Main Menu ===")
+        print("1. Employee Menu")
+        print("2. Project Menu")
+        print("4. Exit")
+        choice = input("Choose an option: ").strip()
 
         if choice == "1":
-            # Add Employee
-            first_name = input_non_empty("First Name: ")
-            last_name = input_non_empty("Last Name: ")
-            email = input_email("Email: ")
-            hire_date = input_date("Hire Date (YYYY-MM-DD): ")
-            department = input_non_empty("Department: ")
-            emp_id = add_employee(first_name, last_name, email, hire_date, department)
-            print(f"✅ Employee added with ID: {emp_id}")
-
+            employee_menu(conn)
         elif choice == "2":
-            # List All Employees
-            employees = list_all_employees()
-            if not employees:
-                print("No employees found.")
-            else:
-                # Simple tabular output
-                print(f"{'ID':<5} {'First Name':<15} {'Last Name':<15} {'Email':<30} {'Hire Date':<12} {'Department':<15}")
-                print("-" * 95)
-                for emp in employees:
-                    print(f"{emp['employee_id']:<5} {emp['first_name']:<15} {emp['last_name']:<15} {emp['email']:<30} {emp['hire_date']:<12} {emp['department']:<15}")
-
+            project_menu(conn)
         elif choice == "3":
-            emp_id = input_non_empty("Enter Employee ID: ")
-            try:
-                emp_id = int(emp_id)
-                emp = get_employee_by_id(emp_id)
-                print(f"{'ID':<5} {'First Name':<15} {'Last Name':<15} {'Email':<30} {'Hire Date':<12} {'Department':<15}")
-                print("-" * 95)
-                print(f"{emp['employee_id']:<5} {emp['first_name']:<15} {emp['last_name']:<15} {emp['email']:<30} {emp['hire_date']:<12} {emp['department']:<15}")
-            except ValueError:
-                print("⚠️ Invalid ID entered.")
-            except Exception as e:
-                print(f"⚠️ {e}")
-
-        elif choice == "4":
-            emp_id = input_non_empty("Enter Employee ID to update: ")
-            try:
-                emp_id = int(emp_id)
-                field = input_non_empty("Field to update (first_name, last_name, email, hire_date, department): ")
-                if field == "email":
-                    new_value = input_email(f"New value for {field}: ")
-                elif field == "hire_date":
-                    new_value = input_date(f"New value for {field}: ")
-                else:
-                    new_value = input_non_empty(f"New value for {field}: ")
-                update_employee(emp_id, field, new_value)
-                print("✅ Employee updated successfully.")
-            except ValueError:
-                print("⚠️ Invalid ID entered.")
-            except Exception as e:
-                print(f"⚠️ {e}")
-
-        elif choice == "5":
-            emp_id = input_non_empty("Enter Employee ID to delete: ")
-            try:
-                emp_id = int(emp_id)
-                delete_employee(emp_id)
-                print("✅ Employee deleted successfully.")
-            except ValueError:
-                print("⚠️ Invalid ID entered.")
-            except Exception as e:
-                print(f"⚠️ {e}")
-
-        elif choice == "6":
-            print("Exiting program.")
+            print("Exiting...")
             break
-
         else:
-            print("⚠️ Invalid choice. Please enter a number from 1 to 6.")
+            print("⚠️ Invalid choice. Try again.")
 
+    conn.close()
+
+
+# -------------------------
+# Employee Submenu
+# -------------------------
+def employee_menu(conn):
+    while True:
+        print("\n--- Employee Menu ---")
+        print("1. Add Employee")
+        print("2. List All Employees")
+        print("3. Update Employee")
+        print("4. Delete Employee")
+        print("5. Search by Name")
+        print("6. Search by Department")
+        print("7. Recently Hired Employees")
+        print("8. Export Employees to CSV")
+        print("9. Back to Main Menu")
+
+        choice = input("Choose an option: ").strip()
+
+        if choice == "1":
+            add_employee(conn)
+        elif choice == "2":
+            display_table(list_all_employees(conn), "Employees")
+        elif choice == "3":
+            emp_id = int(input("Enter employee ID to update: "))
+            update_employee(emp_id, conn)
+        elif choice == "4":
+            emp_id = int(input("Enter employee ID to delete: "))
+            delete_employee(emp_id, conn)
+        elif choice == "5":
+            name = input("Enter name to search: ")
+            display_table(search_employees_by_name(name, conn), "Employees")
+        elif choice == "6":
+            dept = input("Enter department to search: ")
+            display_table(search_employees_by_department(dept, conn), "Employees")
+        elif choice == "7":
+            limit = int(input("How many recent hires to show? "))
+            display_table(get_recently_hired_employees(limit, conn), "Employees")
+        elif choice == "8":
+            file_path = input("Enter CSV file path to export: ")
+            export_employees_to_csv(file_path, conn)
+        elif choice == "9":
+            break
+        else:
+            print("⚠️ Invalid choice. Try again.")
+
+
+# -------------------------
+# Project Submenu
+# -------------------------
+def project_menu(conn):
+    while True:
+        print("\n--- Project Menu ---")
+        print("1. Add Project")
+        print("2. List All Projects")
+        print("3. Update Project")
+        print("4. Delete Project")
+        print("5. Assign Employee to Project")
+        print("6. Unassign Employee from Project")
+        print("7. Get Projects for Employee")
+        print("8. Get Employees for Project")
+        print("9. Search Projects by Name")
+        print("10. Get Projects by Status")
+        print("11. Get Project Count by Status")
+        print("12. Bulk Assign Employees")
+        print("13. Export Projects to CSV")
+        print("14. Back to Main Menu")
+
+        choice = input("Choose an option: ").strip()
+
+        if choice == "1":
+            add_project(conn)
+        elif choice == "2":
+            display_table(list_all_projects(conn), "Projects")
+        elif choice == "3":
+            pid = int(input("Enter project ID to update: "))
+            update_project(pid, conn)
+        elif choice == "4":
+            pid = int(input("Enter project ID to delete: "))
+            delete_project(pid, conn)
+        elif choice == "5":
+            eid = int(input("Enter employee ID: "))
+            pid = int(input("Enter project ID: "))
+            role = input("Enter role: ")
+            assign_employee_to_project(eid, pid, role, conn)
+        elif choice == "6":
+            eid = int(input("Enter employee ID: "))
+            pid = int(input("Enter project ID: "))
+            unassign_employee_from_project(eid, pid, conn)
+        elif choice == "7":
+            eid = int(input("Enter employee ID: "))
+            display_table(get_projects_for_employee(eid, conn), f"Projects for Employee {eid}")
+        elif choice == "8":
+            pid = int(input("Enter project ID: "))
+            display_table(get_employees_for_project(pid, conn), f"Employees for Project {pid}")
+        elif choice == "9":
+            name = input("Enter project name to search: ")
+            display_table(search_projects_by_name(name, conn), "Projects")
+        elif choice == "10":
+            status = input(f"Enter status {ALLOWED_STATUSES}: ")
+            display_table(get_projects_by_status(status, conn), f"Projects with status {status}")
+        elif choice == "11":
+            counts = get_project_count_by_status(conn)
+            print("\nProject counts by status:")
+            for status, count in counts.items():
+                print(f"{status}: {count}")
+        elif choice == "12":
+            print("Enter assignments (employee_id, project_id, role) one per line. Type 'done' to finish.")
+            assignments = []
+            while True:
+                line = input("Assignment: ")
+                if line.lower() == "done":
+                    break
+                parts = line.split(",")
+                if len(parts) != 3:
+                    print("⚠️ Invalid input format. Use employee_id,project_id,role")
+                    continue
+                try:
+                    assignments.append({
+                        "employee_id": int(parts[0].strip()),
+                        "project_id": int(parts[1].strip()),
+                        "role": parts[2].strip()
+                    })
+                except ValueError:
+                    print("⚠️ Employee ID and Project ID must be integers.")
+            bulk_assign_employees(assignments, conn)
+        elif choice == "13":
+            file_path = input("Enter CSV file path to export: ")
+            export_projects_to_csv(file_path, conn)
+        elif choice == "14":
+            break
+        else:
+            print("⚠️ Invalid choice. Try again.")
+
+
+# -------------------------
+# Entry Point
+# -------------------------
 if __name__ == "__main__":
     main()
