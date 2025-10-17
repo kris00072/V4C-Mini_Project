@@ -52,7 +52,7 @@ def validate_department(department: str) -> bool:
         return False
     return True
 
-def get_valid_input(prompt: str, validate_func, conn=None):
+def get_valid_input(prompt: str, validate_func, conn=None):  # pragma: no cover
     while True:
         value = input(prompt)
         if conn:

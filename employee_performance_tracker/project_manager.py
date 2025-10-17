@@ -55,7 +55,7 @@ def validate_role(role: str) -> bool:
         return False
     return True
 
-def get_valid_input(prompt: str, validate_func, conn=None, **kwargs):
+def get_valid_input(prompt: str, validate_func, conn=None, **kwargs):  # pragma: no cover
     while True:
         value = input(prompt)
         if conn:
@@ -226,6 +226,12 @@ def list_all_projects(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM projects ORDER BY project_id")
     return [dict(r) for r in cursor.fetchall()]
+
+def get_project_by_id(project_id: int, conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
 
 def search_projects_by_name(project_name: str, conn):
     cursor = conn.cursor()

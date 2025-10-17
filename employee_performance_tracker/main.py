@@ -7,6 +7,15 @@ from database_connections import get_sqlite_connection, get_mongo_collection
 from employee_manager import *
 from project_manager import *
 from performance_reviewer import *
+import performance_reviewer as pr
+from reports import (
+    report_all_employees,
+    report_employee_detail,
+    report_all_projects,
+    report_project_detail,
+    report_top_performers,
+    report_reviews_by_date_range,
+)
 
 
 # -------------------------
@@ -19,6 +28,48 @@ def display_table(records, title="Records"):
         return
     headers = records[0].keys()
     rows = [r.values() for r in records]
+    print(f"\n--- {title} ---")
+    print(tabulate(rows, headers=headers, tablefmt="grid"))
+
+
+def display_reviews_table(reviews, title="Performance Reviews"):
+    """Pretty-print reviews with normalized fields and readable columns."""
+    if not reviews:
+        print(f"\n[WARNING] No {title.lower()} found.\n")
+        return
+    def normalize_list_field(value):
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value if str(v).strip())
+        return str(value)
+    def short(text, max_len=40):
+        s = str(text) if text is not None else ""
+        return s if len(s) <= max_len else s[:max_len - 1] + "…"
+    headers = [
+        "Review ID",
+        "Employee ID",
+        "Reviewer",
+        "Rating",
+        "Review Date",
+        "Strengths",
+        "Areas",
+        "Comments",
+        "Goals",
+    ]
+    rows = []
+    for r in reviews:
+        rows.append([
+            r.get("review_id") or r.get("_id"),
+            r.get("employee_id"),
+            r.get("reviewer_name"),
+            r.get("overall_rating"),
+            r.get("review_date"),
+            short(normalize_list_field(r.get("strengths"))),
+            short(normalize_list_field(r.get("areas_for_improvement"))),
+            short(r.get("comments")),
+            short(normalize_list_field(r.get("goals_for_next_period"))),
+        ])
     print(f"\n--- {title} ---")
     print(tabulate(rows, headers=headers, tablefmt="grid"))
 
@@ -36,7 +87,8 @@ def main():
         print("1. Employee Menu")
         print("2. Project Menu")
         print("3. Performance Review Menu")
-        print("4. Exit")
+        print("4. Reports Menu")
+        print("5. Exit")
         choice = input("Choose an option: ").strip()
 
         if choice == "1":
@@ -46,6 +98,8 @@ def main():
         elif choice == "3":
             performance_review_menu(collection)
         elif choice == "4":
+            reports_submenu()
+        elif choice == "5":
             print("Exiting...")
             break
         else:
@@ -192,6 +246,13 @@ def project_menu(conn):
 # Performance Review Submenu
 # -------------------------
 def performance_review_menu(collection):
+    # Ensure integer review_id exists for all documents
+    try:
+        updated = pr.ensure_review_ids(collection)
+        if updated:
+            print(f"[INFO] Migrated {updated} reviews to integer review_id.")
+    except Exception:
+        pass
     while True:
         print("\n--- Performance Review Menu ---")
         print("1. Submit Performance Review (Interactive)")
@@ -219,7 +280,7 @@ def performance_review_menu(collection):
                 submit_performance_review(collection=collection, **review_data)
         elif choice == "3":
             reviews = get_performance_reviews_for_employee(collection=collection)
-            display_table(reviews, "Performance Reviews")
+            display_reviews_table(reviews, "Performance Reviews")
         elif choice == "4":
             avg_rating = get_average_rating_for_employee(collection=collection)
             if avg_rating is not None:
@@ -259,18 +320,20 @@ def performance_review_menu(collection):
             else:
                 print("[WARNING] No fields provided for update.")
         elif choice == "6":
-            delete_performance_review(collection=collection)
+            # Prompt specifically for integer review_id by default
+            review_id = input("Enter review ID to delete (integer): ").strip()
+            pr.delete_performance_review(collection=collection, review_id=review_id)
         elif choice == "7":
             limit = input("Enter limit (default 5): ").strip()
             limit = int(limit) if limit.isdigit() else 5
             reviews = get_recent_reviews(collection=collection, limit=limit)
-            display_table(reviews, "Recent Reviews")
+            display_reviews_table(reviews, "Recent Reviews")
         elif choice == "8":
             reviews = get_reviews_by_reviewer(collection=collection)
-            display_table(reviews, "Reviews by Reviewer")
+            display_reviews_table(reviews, "Reviews by Reviewer")
         elif choice == "9":
             reviews = get_reviews_by_date_range(collection=collection)
-            display_table(reviews, "Reviews by Date Range")
+            display_reviews_table(reviews, "Reviews by Date Range")
         elif choice == "10":
             strengths = aggregate_strengths(collection=collection)
             if strengths:
@@ -301,6 +364,52 @@ def performance_review_menu(collection):
             break
         else:
             print("[WARNING] Invalid choice. Try again.")
+
+
+# -------------------------
+# Reports Submenu
+# -------------------------
+def reports_submenu():
+    while True:
+        print("\n=== Reports Menu ===")
+        print("1. List all employees")
+        print("2. Employee detailed report")
+        print("3. List all projects")
+        print("4. Project detailed report")
+        print("5. Top performers")
+        print("6. Reviews by date range")
+        print("7. Back to Main Menu")
+
+        choice = input("Select an option: ").strip()
+
+        if choice == "1":
+            report_all_employees()
+        elif choice == "2":
+            eid = input("Enter employee ID: ").strip()
+            if eid.isdigit():
+                report_employee_detail(int(eid))
+            else:
+                print("[WARNING] Invalid employee ID.")
+        elif choice == "3":
+            report_all_projects()
+        elif choice == "4":
+            pid = input("Enter project ID: ").strip()
+            if pid.isdigit():
+                report_project_detail(int(pid))
+            else:
+                print("[WARNING] Invalid project ID.")
+        elif choice == "5":
+            limit = input("Enter number of top performers to list (default 5): ").strip()
+            limit = int(limit) if limit.isdigit() else 5
+            report_top_performers(limit)
+        elif choice == "6":
+            start = input("Enter start date (YYYY-MM-DD): ").strip()
+            end = input("Enter end date (YYYY-MM-DD): ").strip()
+            report_reviews_by_date_range(start, end)
+        elif choice == "7":
+            break
+        else:
+            print("[WARNING] Invalid option. Try again.")
 
 
 # -------------------------
