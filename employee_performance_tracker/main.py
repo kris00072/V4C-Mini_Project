@@ -15,7 +15,7 @@ from performance_reviewer import *
 def display_table(records, title="Records"):
     """Pretty-print records as a table."""
     if not records:
-        print(f"\n⚠️ No {title.lower()} found.\n")
+        print(f"\n[WARNING] No {title.lower()} found.\n")
         return
     headers = records[0].keys()
     rows = [r.values() for r in records]
@@ -35,6 +35,7 @@ def main():
         print("\n=== Main Menu ===")
         print("1. Employee Menu")
         print("2. Project Menu")
+        print("3. Performance Review Menu")
         print("4. Exit")
         choice = input("Choose an option: ").strip()
 
@@ -43,10 +44,12 @@ def main():
         elif choice == "2":
             project_menu(conn)
         elif choice == "3":
+            performance_review_menu(collection)
+        elif choice == "4":
             print("Exiting...")
             break
         else:
-            print("⚠️ Invalid choice. Try again.")
+            print("[WARNING] Invalid choice. Try again.")
 
     conn.close()
 
@@ -94,7 +97,7 @@ def employee_menu(conn):
         elif choice == "9":
             break
         else:
-            print("⚠️ Invalid choice. Try again.")
+            print("[WARNING] Invalid choice. Try again.")
 
 
 # -------------------------
@@ -165,7 +168,7 @@ def project_menu(conn):
                     break
                 parts = line.split(",")
                 if len(parts) != 3:
-                    print("⚠️ Invalid input format. Use employee_id,project_id,role")
+                    print("[WARNING] Invalid input format. Use employee_id,project_id,role")
                     continue
                 try:
                     assignments.append({
@@ -174,7 +177,7 @@ def project_menu(conn):
                         "role": parts[2].strip()
                     })
                 except ValueError:
-                    print("⚠️ Employee ID and Project ID must be integers.")
+                    print("[WARNING] Employee ID and Project ID must be integers.")
             bulk_assign_employees(assignments, conn)
         elif choice == "13":
             file_path = input("Enter CSV file path to export: ")
@@ -182,7 +185,122 @@ def project_menu(conn):
         elif choice == "14":
             break
         else:
-            print("⚠️ Invalid choice. Try again.")
+            print("[WARNING] Invalid choice. Try again.")
+
+
+# -------------------------
+# Performance Review Submenu
+# -------------------------
+def performance_review_menu(collection):
+    while True:
+        print("\n--- Performance Review Menu ---")
+        print("1. Submit Performance Review (Interactive)")
+        print("2. Submit Performance Review (Comprehensive Form)")
+        print("3. Get Reviews for Employee")
+        print("4. Get Average Rating for Employee")
+        print("5. Update Performance Review")
+        print("6. Delete Performance Review")
+        print("7. Get Recent Reviews")
+        print("8. Get Reviews by Reviewer")
+        print("9. Get Reviews by Date Range")
+        print("10. Aggregate Strengths")
+        print("11. Aggregate Areas for Improvement")
+        print("12. Get Top Goals")
+        print("13. Back to Main Menu")
+
+        choice = input("Choose an option: ").strip()
+
+        if choice == "1":
+            submit_performance_review(collection=collection)
+        elif choice == "2":
+            from performance_reviewer import get_comprehensive_review_input
+            review_data = get_comprehensive_review_input()
+            if review_data:
+                submit_performance_review(collection=collection, **review_data)
+        elif choice == "3":
+            reviews = get_performance_reviews_for_employee(collection=collection)
+            display_table(reviews, "Performance Reviews")
+        elif choice == "4":
+            avg_rating = get_average_rating_for_employee(collection=collection)
+            if avg_rating is not None:
+                print(f"\n[SUCCESS] Average rating: {avg_rating}")
+        elif choice == "5":
+            print("\n=== Update Performance Review ===")
+            print("Available fields to update:")
+            print("- employee_id")
+            print("- reviewer_name") 
+            print("- overall_rating")
+            print("- review_date")
+            print("- strengths")
+            print("- areas_for_improvement")
+            print("- comments")
+            print("- goals_for_next_period")
+            print("\nEnter fields to update (leave blank to skip):")
+            fields = {}
+            
+            # Get review ID first
+            review_id = input("Enter review ID to update: ").strip()
+            if not review_id:
+                print("[WARNING] Review ID is required.")
+                continue
+            
+            # Get fields to update
+            while True:
+                field = input("Field name (or 'done' to finish): ").strip()
+                if field.lower() == 'done':
+                    break
+                if field:
+                    value = input(f"New value for {field}: ").strip()
+                    if value:
+                        fields[field] = value
+            
+            if fields:
+                update_performance_review(collection=collection, review_id=review_id, **fields)
+            else:
+                print("[WARNING] No fields provided for update.")
+        elif choice == "6":
+            delete_performance_review(collection=collection)
+        elif choice == "7":
+            limit = input("Enter limit (default 5): ").strip()
+            limit = int(limit) if limit.isdigit() else 5
+            reviews = get_recent_reviews(collection=collection, limit=limit)
+            display_table(reviews, "Recent Reviews")
+        elif choice == "8":
+            reviews = get_reviews_by_reviewer(collection=collection)
+            display_table(reviews, "Reviews by Reviewer")
+        elif choice == "9":
+            reviews = get_reviews_by_date_range(collection=collection)
+            display_table(reviews, "Reviews by Date Range")
+        elif choice == "10":
+            strengths = aggregate_strengths(collection=collection)
+            if strengths:
+                print("\n--- Strengths Frequency ---")
+                for strength, count in strengths.items():
+                    print(f"{strength}: {count}")
+            else:
+                print("[WARNING] No strengths found.")
+        elif choice == "11":
+            areas = aggregate_areas_for_improvement(collection=collection)
+            if areas:
+                print("\n--- Areas for Improvement Frequency ---")
+                for area, count in areas.items():
+                    print(f"{area}: {count}")
+            else:
+                print("[WARNING] No improvement areas found.")
+        elif choice == "12":
+            limit = input("Enter limit (default 5): ").strip()
+            limit = int(limit) if limit.isdigit() else 5
+            goals = get_top_goals(collection=collection, limit=limit)
+            if goals:
+                print(f"\n--- Top {limit} Goals ---")
+                for i, goal in enumerate(goals, 1):
+                    print(f"{i}. {goal}")
+            else:
+                print("[WARNING] No goals found.")
+        elif choice == "13":
+            break
+        else:
+            print("[WARNING] Invalid choice. Try again.")
 
 
 # -------------------------
