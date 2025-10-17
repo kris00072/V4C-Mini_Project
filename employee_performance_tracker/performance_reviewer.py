@@ -26,6 +26,7 @@ from collections import Counter
 import re
 
 from database_connections import get_mongo_collection, get_sqlite_connection
+from pymongo import ReturnDocument
 
 
 # -------------------------
@@ -119,7 +120,7 @@ def validate_review_data(employee_id: int, reviewer_name: str, overall_rating: U
     return errors
 
 
-def get_user_input_with_validation(prompt: str, validation_func, error_msg: str, **kwargs):
+def get_user_input_with_validation(prompt: str, validation_func, error_msg: str, **kwargs):  # pragma: no cover
     """Get user input with validation and retry on invalid input."""
     while True:
         try:
@@ -137,7 +138,7 @@ def get_user_input_with_validation(prompt: str, validation_func, error_msg: str,
             print("Please try again.")
 
 
-def get_optional_text_input(prompt: str) -> Optional[str]:
+def get_optional_text_input(prompt: str) -> Optional[str]:  # pragma: no cover
     """Get optional text input that can be empty."""
     value = input(prompt).strip()
     return value if value else None
@@ -151,6 +152,54 @@ def validate_optional_text(value: str) -> bool:
 # -------------------------
 # Core Review Functions
 # -------------------------
+def _get_next_review_id(collection) -> int:
+    """Atomically generate the next integer review_id using a counters collection."""
+    counters = collection.database["counters"]
+    doc = counters.find_one_and_update(
+        {"_id": "review_id"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(doc.get("seq", 1))
+
+
+def ensure_review_ids(collection=None) -> int:
+    """
+    Ensure all review documents have an integer review_id. Returns number of documents updated.
+    Initializes/bumps the counters.review_id sequence to be >= current max(review_id).
+    """
+    if collection is None:
+        try:
+            collection = get_mongo_collection()
+        except Exception:
+            return 0
+
+    # Determine current max review_id in documents
+    try:
+        agg = list(collection.aggregate([
+            {"$group": {"_id": None, "maxId": {"$max": "$review_id"}}}
+        ]))
+        current_max = int(agg[0]["maxId"]) if agg and agg[0].get("maxId") is not None else 0
+    except Exception:
+        current_max = 0
+
+    # Ensure counter is at least current_max
+    counters = collection.database["counters"]
+    counters.update_one(
+        {"_id": "review_id"},
+        {"$max": {"seq": current_max}},
+        upsert=True,
+    )
+
+    # Assign review_id to docs missing it
+    updated = 0
+    for doc in collection.find({"review_id": {"$exists": False}}, {"_id": 1}):
+        next_id = _get_next_review_id(collection)
+        res = collection.update_one({"_id": doc["_id"]}, {"$set": {"review_id": next_id}})
+        if res.modified_count:
+            updated += 1
+    return updated
 def submit_performance_review(
     collection=None,
     employee_id: int = None,
@@ -264,6 +313,7 @@ def submit_performance_review(
     
     # Build the review document
     review_doc = {
+        "review_id": _get_next_review_id(collection),
         "employee_id": employee_id,
         "reviewer_name": reviewer_name.strip(),
         "overall_rating": float(overall_rating),
@@ -292,7 +342,7 @@ def submit_performance_review(
     
     try:
         result = collection.insert_one(review_doc)
-        print(f"[SUCCESS] Performance review submitted successfully with ID: {result.inserted_id}")
+        print(f"[SUCCESS] Performance review submitted successfully. review_id={review_doc['review_id']}, _id={result.inserted_id}")
         return str(result.inserted_id)
     except Exception as e:
         print(f"[WARNING] Failed to submit performance review: {e}")
@@ -485,14 +535,19 @@ def update_performance_review(
         if review_id is None:
             return False
     
-    # Check if review exists
-    try:
-        existing_review = collection.find_one({"_id": ObjectId(review_id)})
-        if not existing_review:
-            print(f"[WARNING]  Review with ID {review_id} not found.")
+    # Resolve review selector (prefer integer review_id when provided)
+    selector = None
+    if review_id is not None and review_id.isdigit():
+        selector = {"review_id": int(review_id)}
+    else:
+        try:
+            selector = {"_id": ObjectId(review_id)}
+        except Exception as e:
+            print(f"[WARNING]  Invalid review ID format: {e}")
             return False
-    except Exception as e:
-        print(f"[WARNING]  Invalid review ID format: {e}")
+    existing_review = collection.find_one(selector)
+    if not existing_review:
+        print(f"[WARNING]  Review with ID {review_id} not found.")
         return False
     
     # Validate fields to update
@@ -535,10 +590,7 @@ def update_performance_review(
             update_doc[field] = value
     
     try:
-        result = collection.update_one(
-            {"_id": ObjectId(review_id)},
-            {"$set": update_doc}
-        )
+        result = collection.update_one(selector, {"$set": update_doc})
         
         if result.modified_count > 0:
             print(f"[SUCCESS] Review {review_id} updated successfully.")
@@ -576,15 +628,25 @@ def delete_performance_review(
     # Interactive input if review_id not provided
     if review_id is None:
         review_id = get_user_input_with_validation(
-            "Enter review ID to delete: ",
-            lambda x: isinstance(x, str) and len(x.strip()) > 0,
-            "Review ID must be a non-empty string."
+            "Enter review ID to delete (integer review_id or Mongo _id): ",
+            lambda x: (x.isdigit() and int(x) > 0) or (isinstance(x, str) and len(x.strip()) > 0),
+            "Provide a positive integer review_id or a valid MongoDB _id."
         )
         if review_id is None:
             return False
-    
+
+    # Build selector: prefer integer review_id when digits
+    if review_id.isdigit():
+        selector = {"review_id": int(review_id)}
+    else:
+        try:
+            selector = {"_id": ObjectId(review_id)}
+        except Exception as e:
+            print(f"[WARNING]  Failed to delete review: {e}")
+            return False
+
     try:
-        result = collection.delete_one({"_id": ObjectId(review_id)})
+        result = collection.delete_one(selector)
         if result.deleted_count > 0:
             print(f"[SUCCESS] Review {review_id} deleted successfully.")
             return True
@@ -982,12 +1044,8 @@ def calculate_average_rating(employee_id: int) -> Optional[float]:
     return get_average_rating_for_employee(employee_id=employee_id)
 
 
-def delete_performance_review(review_id: str) -> bool:
-    """
-    Legacy function for backward compatibility.
-    Use delete_performance_review() with collection parameter instead.
-    """
-    return delete_performance_review(review_id=review_id)
+# Note: Removed legacy duplicate delete_performance_review without collection to avoid
+# accidental recursion and ambiguity. Use delete_performance_review(collection=..., review_id=...)
 
 
 # -------------------------
